@@ -51,25 +51,26 @@ TOOLPREFIX := $(shell if i386-jos-elf-objdump -i 2>&1 | grep '^elf32-i386$$' >/d
 endif
 
 # If the makefile can't find QEMU, specify its path here
+# Put the Qemu executable location here.
 QEMU = /home/poarul/BTP/qemu/build/qemu-system-x86_64
 
 # Try to infer the correct QEMU
-# ifndef QEMU
-# QEMU = $(shell if which qemu > /dev/null; \
-# 	then echo qemu; exit; \
-# 	elif which qemu-system-i386 > /dev/null; \
-# 	then echo qemu-system-i386; exit; \
-# 	elif which qemu-system-x86_64 > /dev/null; \
-# 	then echo qemu-system-x86_64; exit; \
-# 	else \
-# 	qemu=/Applications/Q.app/Contents/MacOS/i386-softmmu.app/Contents/MacOS/i386-softmmu; \
-# 	if test -x $$qemu; then echo $$qemu; exit; fi; fi; \
-# 	echo "***" 1>&2; \
-# 	echo "*** Error: Couldn't find a working QEMU executable." 1>&2; \
-# 	echo "*** Is the directory containing the qemu binary in your PATH" 1>&2; \
-# 	echo "*** or have you tried setting the QEMU variable in Makefile?" 1>&2; \
-# 	echo "***" 1>&2; exit 1)
-# endif
+ifndef QEMU
+QEMU = $(shell if which qemu > /dev/null; \
+	then echo qemu; exit; \
+	elif which qemu-system-i386 > /dev/null; \
+	then echo qemu-system-i386; exit; \
+	elif which qemu-system-x86_64 > /dev/null; \
+	then echo qemu-system-x86_64; exit; \
+	else \
+	qemu=/Applications/Q.app/Contents/MacOS/i386-softmmu.app/Contents/MacOS/i386-softmmu; \
+	if test -x $$qemu; then echo $$qemu; exit; fi; fi; \
+	echo "***" 1>&2; \
+	echo "*** Error: Couldn't find a working QEMU executable." 1>&2; \
+	echo "*** Is the directory containing the qemu binary in your PATH" 1>&2; \
+	echo "*** or have you tried setting the QEMU variable in Makefile?" 1>&2; \
+	echo "***" 1>&2; exit 1)
+endif
 
 CC = $(TOOLPREFIX)gcc
 AS = $(TOOLPREFIX)gas
@@ -156,6 +157,12 @@ _forktest: forktest.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _forktest forktest.o ulib.o usys.o
 	$(OBJDUMP) -S _forktest > forktest.asm
 
+#SRCS    := $(wildcard userCodeTest_*.c)
+
+_userCodeTest: userCodeTest.o $(ULIB)
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _userCodeTest userCodeTest.o ulib.o usys.o
+	$(OBJDUMP) -S _userCodeTest > userCodeTest.asm
+
 mkfs: mkfs.c fs.h
 	gcc -Werror -Wall -o mkfs mkfs.c
 
@@ -178,13 +185,15 @@ UPROGS=\
 	_rm\
 	_sh\
 	_stressfs\
-	_usertests\
 	_wc\
 	_zombie\
+	_userCodeTest\
+	#_usertests\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
 
+userCodeTest: 
 -include *.d
 
 clean: 
@@ -248,8 +257,8 @@ qemu-nox-gdb: fs.img xv6.img .gdbinit
 # check in that version.
 
 EXTRA=\
-	mkfs.c ulib.c user.h cat.c echo.c forktest.c grep.c kill.c\
-	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c\
+	mkfs.c ulib.c user.h cat.c echo.c forktest.c userCodeTest.c grep.c kill.c\
+	ln.c ls.c mkdir.c rm.c stressfs.c wc.c zombie.c\
 	printf.c umalloc.c\
 	README dot-bochsrc *.pl toc.* runoff runoff1 runoff.list\
 	.gdbinit.tmpl gdbutil\

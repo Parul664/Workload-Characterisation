@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 
 #include <qemu-plugin.h>
 
@@ -15,13 +16,22 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 /* Store last executed instruction on each vCPU as a GString */
 GArray *last_exec;
 static uint64_t insn_count;
-
+static uint64_t start_pnt; 
+static uint64_t trace_count;
+static int start_tracing;
+static uint64_t nop_count;
+static int MILLION = 0;
+static FILE *filePtr;
 /**
  * Log instruction execution
  */
 static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 {
-    if (insn_count > 100000000){
+
+    if(!start_tracing)
+        return;
+
+    if (insn_count >= start_pnt && insn_count < start_pnt + trace_count){
         GString *s;
 
         /* Find or create vCPU in array */
@@ -32,17 +42,28 @@ static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
         s = g_array_index(last_exec, GString *, cpu_index);
 
         /* Print previous instruction in cache */
-        if (s->len) {
-            qemu_plugin_outs(s->str);
-            qemu_plugin_outs("\n");
+        // if (s->len) {
+        //     qemu_plugin_outs(s->str);
+        //     qemu_plugin_outs("\n");
+        // }
+        if(s->len){
+            fprintf(filePtr, "%s\n", s->str);
         }
 
         /* Store new instruction in cache */
         /* vcpu_mem will add memory access information to last_exec */
         g_string_printf(s, "%u, ", cpu_index);
+        // new addtion by me
+        if(MILLION==1000000){
+            //g_string_printf(s, " <insCount -> %ld>, <nopCount -> %ld>  ", insn_count, nop_count);
+            MILLION = 0;
+        }
         g_string_append(s, (char *)udata);
+    
+    }else{
+        fprintf(filePtr, "%ld\n", insn_count);
     }
-
+    MILLION++;
     insn_count++;
 }
 
@@ -72,12 +93,31 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
         insn_vaddr = qemu_plugin_insn_vaddr(insn);
         insn_opcode = *((uint32_t *)qemu_plugin_insn_data(insn));
         insn_disas = qemu_plugin_insn_disas(insn);
-        char *output = g_strdup_printf("0x%"PRIx64", 0x%"PRIx32", \"%s\"",
-                                       insn_vaddr, insn_opcode, insn_disas);
 
+        if(strstr(insn_disas, "nop")){
+            nop_count += 1;
+            //printf("%ld\n", nop_count);
+            // printf("increasing nop count %ld\n", nop_count);
+        }else{
+            nop_count = 0;
+        }
+
+        
+        
+        char *output = g_strdup_printf("0x%"PRIx64", 0x%"PRIx32", \"%s\", 0x%"PRIx64"",
+                                       insn_vaddr, insn_opcode, insn_disas, nop_count);
+
+        // if(insn_vaddr > 0x80000000){
+        //     output = "";
+        // }
+        if(nop_count == 997){
+            start_tracing = (start_tracing == 1) ? 0 : 1;
+            //printf("Start tracing set to 1");
+        }
         qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec,
                                                QEMU_PLUGIN_CB_NO_REGS, output);
     }
+    
 }
 
 /**
@@ -97,6 +137,16 @@ static void plugin_exit(qemu_plugin_id_t id, void *p)
     g_autofree gchar *out;
     out = g_strdup_printf("insns: %" PRIu64 "\n", insn_count);
     qemu_plugin_outs(out);
+    fclose(filePtr);
+}
+
+
+static void plugin_init(void)
+{
+    start_tracing = 0;
+    nop_count = 0;
+    filePtr = fopen("instTrace.log", "w");
+    last_exec = g_array_new(FALSE, FALSE, sizeof(GString *));
 }
 
 /**
@@ -106,11 +156,29 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
                                            const qemu_info_t *info, int argc,
                                            char **argv)
 {
-    /*
-     * Initialize dynamic array to cache vCPU instruction. In user mode
-     * we don't know the size before emulation.
-     */
-    last_exec = g_array_new(FALSE, FALSE, sizeof(GString *));
+    // signal(40, sig_handler);
+    
+    start_pnt = 0; 
+    trace_count = __LONG_LONG_MAX__;
+    for (int i = 0; i < argc; i++) {
+        char *p = argv[i];
+        g_autofree char **tokens = g_strsplit(p, "=", -1);
+        if (g_strcmp0(tokens[0], "start") == 0) {
+            printf("%s : %s\n", tokens[0], tokens[1]);
+            char *value = tokens[1];
+            start_pnt = strtoull(value, NULL, 0);
+
+        } else if (g_strcmp0(tokens[0], "count") == 0) {
+            printf("%s : %s\n", tokens[0], tokens[1]);
+            char *value = tokens[1];
+            trace_count = strtoull(value, NULL, 0);
+        } else {
+            fprintf(stderr, "option parsing failed: %s\n", p);
+            return -1;
+        }
+    }
+    
+    plugin_init();
 
     /* Register translation block and exit callbacks */
     qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);
