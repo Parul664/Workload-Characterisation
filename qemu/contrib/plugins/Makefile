@@ -6,7 +6,8 @@
 # cflags that the main configure has already done for us.
 #
 
-BUILD_DIR := $(CURDIR)/../../build/
+# BUILD_DIR := $(CURDIR)/../..
+BUILD_DIR := $(CURDIR)/../../build
 
 include $(BUILD_DIR)/config-host.mak
 
@@ -22,7 +23,6 @@ NAMES += hwprofile
 NAMES += cache
 NAMES += tracelog
 
-
 SONAMES := $(addsuffix .so,$(addprefix lib,$(NAMES)))
 
 # The main QEMU uses Glib extensively so it's perfectly fine to use it
@@ -35,10 +35,10 @@ CFLAGS += -I$(SRC_PATH)/include/qemu
 all: $(SONAMES)
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -g -c -o $@ $<
 
 lib%.so: %.o
-	$(CC) -shared -Wl,-soname,$@ -o $@ $^ $(LDLIBS)
+	$(CC) -g -shared -Wl,-soname,$@ -o $@ $^ $(LDLIBS)
 
 clean:
 	rm -f *.o *.so *.d
